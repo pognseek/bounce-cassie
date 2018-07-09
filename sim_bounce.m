@@ -20,12 +20,13 @@ vdes = sqrt(2*g*(params.H - params.rb)); % Desired velocity for H
 
 % 2D Variables
 x0  = 0;            % Initial horizontal position
-dx0 = 5;          % Initial horizontal velocity
+dx0 = randn;          % Initial horizontal velocity
 xp0 = 0;            % Initial horizontal position of the paddle
 th0 = 0;            % Initial angle of the paddle
 dxp0 = 0; dzp0 = 0; dthp0 = 0;  % Paddle velocities (rest)
+dthmax = 1000*pi;    % Maximum rotational velocity (100% made-up)
 
-est = false;        % Should we estimate coefficient of restitution?
+est = true;        % Should we estimate coefficient of restitution?
 
 % Simulation parameters
 T  = 3;     % Length of simulation (s)
@@ -35,7 +36,7 @@ printon = true;
 %% Initialization
 % States
 x      = [x0; H0; dx0; vb0; ... % Ball states: x, z, dx, dz
-    xp0; params.P; th0];% dxp0; dzp0; dthp0]; % Paddle: x, z, th, dx, dz, dth
+    xp0; params.P; th0; dxp0; dzp0; dthp0]; % Paddle: x, z, th, dx, dz, dth
 xi     = x;         % Initial states (for flight phase)
 t      = 0;         % Time at start of simulation
 t_imp  = 0;         % Time of xi
@@ -54,6 +55,7 @@ end
 
 %% Simulation
 while t < T
+    xpre = x;
     % Ball in flight
     if flight
         % Ball dynamics, ballistic motion
@@ -67,10 +69,19 @@ while t < T
         x(5) = x(1);    % Horizontally track ball
         x(6) = x(6);    % Vertically stay put
         if abs(x(3)) > 1e-3
-            x(7) = (th_des + atan(x(4)/x(3))) / 2;    % Angle track
+            th_p = (th_des + atan(x(4)/x(3))) / 2;    % Angle track
         else
-            x(7) = 0;    % Stay put if ball bouncing straight up
+            th_p = 0;    % Stay put if ball bouncing straight up
         end
+        
+        % Velocities
+        x(8) = xpre(5) - x(5);  % Horizontally track ball
+        x(9) = xpre(6) - x(6);  % Vertically stay put
+%         x(10)= min(-dthmax, max((th_p - xpre(7))/dt, dthmax));
+        x(10)= (th_p - xpre(7)) / dt;
+        
+        % Adjust angle
+        x(7) = xpre(7) + dt * x(10);
         
         % Impact?
         if (x(2) <= (x(6) + params.rb)) && (x(4) < 0) % Hits paddle after falling
@@ -84,11 +95,16 @@ while t < T
         th_ball_pre = atan(x(4) / x(3));        % Angle of the ball velocity
         v_ball_pre  = -sqrt(x(3)^2 + x(4)^2);   % Magnitude of ball velocity
 %         th_p = (th_des + th_ball_pre) / 2;      % Desired angle of the paddle
-        th_p = x(7);
         
-        % Calculations: after impact
+        % Calculations: angle after impact
         th_ball_post = - th_ball_pre + 2*th_p;  % Angle of ball velocity, post-impact
-        v_post = -ke * v_ball_pre + (1+ke) * 0; % Magnitude of ball velocity, post-impact
+        
+        % Calculations: paddle states
+        th_p = x(7);    % Angle calculated during flight
+        vp = 1/(1+kest) * (vdes/sin(th_ball_post) + kest*v_ball_pre);
+        
+        % Calculations: velocity of ball after impact
+        v_post = -ke * v_ball_pre + (1+ke) * vp; % Magnitude of ball velocity, post-impact
         
         % Ball dynamics: position
         x(1) = x(1);    % No deformation
@@ -97,13 +113,24 @@ while t < T
         x(4) = v_post * sin(th_ball_post);
         
         % Paddle: no dynamics
-        x(5) = x(5);
-        x(6) = x(6);
-        x(7) = x(7);% no change th_p;    % New angle of the paddle
+%         x(5) = x(5);
+%         x(6) = x(6);
+        x(7) = th_p;    % New angle of the paddle
+        
+        x(8) = vp * sin(th_p);
+        x(9) = vp * cos(th_p);
+        x(10)= x(10);
+        
+        % Reaction of paddle
+        x(5) = x(5) + x(8) * dt;
+        x(6) = x(6) + x(9) * dt;
+        
+        vpmat = [vpmat; length(tmat)+1, th_p, x(8), x(9)];
         
         % Estimate
         if est
-            kest = (x(2) - vp) / (vp - vpre);
+            vpostest = sqrt(x(3)^2 + x(4)^2);
+            kest = (vpostest - vp) / (vp - v_ball_pre);
         end
         
         % Update
@@ -134,13 +161,18 @@ hold on; plot(tmat',phase'*params.rb);              % Phase
 plot([tmat(1) tmat(end)],params.H*[1 1]); hold off  % Desired height
 title(['H_{des} = ' num2str(params.H)]);
 a(3) = subplot(2,3,3); plot(tmat',xmat(7,:)','.-'); % Angle
+hold on; plot(tmat(vpmat(:,1))', vpmat(:,2),'ro'); hold off; % Paddle angle at impact
 title('Angle')
 
-a(4) = subplot(2,3,4); plot(tmat',xmat(3,:)','.-'); % Horizontal velocity
-hold on; plot([tmat(1) tmat(end)],[0 0]); hold off; % Want velocity = 0
+a(4) = subplot(2,3,4); plot(tmat',xmat([3 8],:)','.-'); % Horizontal velocity
+hold on; plot([tmat(1) tmat(end)],[0 0]);           % Want velocity = 0
+plot(tmat(vpmat(:,1))', vpmat(:,3),'ro'); hold off; % Paddle velocity at impact
 title(['dx_{des} = 0']);
-a(5) = subplot(2,3,5); plot(tmat',xmat(4,:)','.-'); % Vertical velocity
+a(5) = subplot(2,3,5); plot(tmat',xmat([4 9],:)','.-'); % Vertical velocity
+hold on; plot(tmat(vpmat(:,1))', vpmat(:,4),'ro'); hold off; % Paddle velocity at impact
 title('dz')
+a(6) = subplot(2,3,6); plot(tmat',xmat(10,:)','.-');    % Angular velocity
+title('d\theta')
 linkaxes(a,'x');
 
 animatefun(tmat',xmat',params);

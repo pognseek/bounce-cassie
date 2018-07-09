@@ -30,7 +30,7 @@ thp= intcoords(:,5);
 % ay = (aymax + aymin) / 2;
 % a = max(ax,ay);
 % a = max(ax,(aymax - aymin)/2);
-a = 5; ay = 0;
+a = 3; ay = 0;
 
 for i=1:length(tspan)
     figure(fignum);
@@ -52,9 +52,9 @@ for i=1:length(tspan)
 %     plot([-a/2 a/2],[params.H params.H],'r--')
     hold off
     
-    
+    ax = (xb(i) + xp(i)) / 2;
     title(['t = ' num2str(tspan(i))]);
-    axis([-a a ay-a ay+a]); axis square;
+    axis([ax-a ax+a ay-a ay+a]); axis square;
     
     pause(dt/100);
 end
